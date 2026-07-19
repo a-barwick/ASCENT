@@ -1,0 +1,16 @@
+{
+  "name": "ascent",
+  "private": true,
+  "packageManager": "pnpm@11.9.0",
+  "scripts": {
+    "build": "pnpm --recursive --if-present build",
+    "check": "pnpm --recursive --if-present check",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "pnpm --recursive --if-present test"
+  },
+  "devDependencies": {
+    "prettier": "3.9.5",
+    "prettier-plugin-svelte": "4.1.1"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "@ascent/protocol",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./gen/ts/envelopes.gen.ts"
+  }
+}

@@ -1,0 +1,40 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.direnv/
+
+# Local editor and tool state
+.agents/
+.codex/
+.claude/
+.cursor/
+.idea/
+.vscode/
+*.swp
+
+# JavaScript and SvelteKit
+node_modules/
+.pnpm-store/
+apps/web/.svelte-kit/
+apps/web/build/
+apps/web/coverage/
+
+# Go and test output
+bin/
+coverage/
+*.coverprofile
+*.test
+
+# Local infrastructure and diagnostics
+compose.override.yaml
+tmp/
+dist/
+*.log
+*.pid
+
+# Never publish local credentials or signing material
+*.key
+*.pem
+*.p12
+*.pfx

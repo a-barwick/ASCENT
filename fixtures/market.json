@@ -1,0 +1,245 @@
+{
+  "seed": 20770524,
+  "generatedAt": "2077-05-24T14:38:04.182Z",
+  "systemTime": "2077-05-24 14:38:04 UTC",
+  "company": {
+    "id": "company-helios",
+    "name": "Helios Industries",
+    "cash": 12480000000,
+    "totalAssets": 47390000000,
+    "totalLiabilities": 21360000000,
+    "netWorth": 26030000000,
+    "creditRating": "A-",
+    "availableCredit": 8750000000,
+    "debtToEquityRatio": 0.82
+  },
+  "market": {
+    "id": "market-lunar-water",
+    "location": "Lunar south pole",
+    "commodity": "Water ice",
+    "unit": "t",
+    "currency": "CR",
+    "lastPrice": 308.25,
+    "change24Hour": 1.7,
+    "volume24Hour": 18420,
+    "spread": 0.95,
+    "history": [
+      {
+        "label": "08:00",
+        "value": 297.4
+      },
+      {
+        "label": "09:00",
+        "value": 300.1
+      },
+      {
+        "label": "10:00",
+        "value": 299.2
+      },
+      {
+        "label": "11:00",
+        "value": 303.8
+      },
+      {
+        "label": "12:00",
+        "value": 302.7
+      },
+      {
+        "label": "13:00",
+        "value": 306.3
+      },
+      {
+        "label": "14:00",
+        "value": 308.25
+      }
+    ]
+  },
+  "orderBook": {
+    "bids": [
+      {
+        "price": 307.8,
+        "quantity": 780.4,
+        "orders": 14
+      },
+      {
+        "price": 307.25,
+        "quantity": 598.7,
+        "orders": 9
+      },
+      {
+        "price": 306.1,
+        "quantity": 846.5,
+        "orders": 11
+      },
+      {
+        "price": 305.4,
+        "quantity": 1034.8,
+        "orders": 17
+      }
+    ],
+    "asks": [
+      {
+        "price": 308.75,
+        "quantity": 612,
+        "orders": 8
+      },
+      {
+        "price": 309.2,
+        "quantity": 730.4,
+        "orders": 12
+      },
+      {
+        "price": 310,
+        "quantity": 980.2,
+        "orders": 16
+      },
+      {
+        "price": 311.5,
+        "quantity": 1205.9,
+        "orders": 19
+      }
+    ]
+  },
+  "facilities": [
+    {
+      "id": "facility-lmc-04",
+      "name": "Lunar Materials Complex 04",
+      "type": "Materials",
+      "location": "Moon",
+      "utilization": 67,
+      "change": -2,
+      "status": "operational"
+    },
+    {
+      "id": "facility-wir-02",
+      "name": "Water Ice Refinery 02",
+      "type": "Refinery",
+      "location": "Moon",
+      "utilization": 92,
+      "change": 3,
+      "status": "operational"
+    },
+    {
+      "id": "facility-pf-03",
+      "name": "Propellant Plant 03",
+      "type": "Fuel plant",
+      "location": "Moon",
+      "utilization": 81,
+      "change": -1,
+      "status": "constrained"
+    },
+    {
+      "id": "facility-pg-07",
+      "name": "Power Generation Array 07",
+      "type": "Power",
+      "location": "Moon",
+      "utilization": 86,
+      "change": 4,
+      "status": "operational"
+    }
+  ],
+  "indices": [
+    {
+      "name": "Lunar market",
+      "value": 2142.7,
+      "change": 0.83
+    },
+    {
+      "name": "Earth market",
+      "value": 1893.7,
+      "change": 0.56
+    },
+    {
+      "name": "LEO freight",
+      "value": 1271.5,
+      "change": -0.23
+    },
+    {
+      "name": "Energy",
+      "value": 682.1,
+      "change": 1.13
+    }
+  ],
+  "incidents": [
+    {
+      "id": "incident-route-0042",
+      "severity": "warning",
+      "summary": "Lunar-orbit transfer capacity below 72%",
+      "time": "14:31"
+    },
+    {
+      "id": "incident-power-0017",
+      "severity": "info",
+      "summary": "South-pole generation forecast revised +2.4%",
+      "time": "14:22"
+    }
+  ],
+  "trace": [
+    {
+      "label": "Company EBITDA",
+      "value": "CR 1.32B",
+      "change": -4.6,
+      "depth": 0
+    },
+    {
+      "label": "Propellant margin",
+      "value": "22.8%",
+      "change": -7.1,
+      "depth": 1
+    },
+    {
+      "label": "Sale price",
+      "value": "CR 1,285/t",
+      "change": -4.2,
+      "depth": 2
+    },
+    {
+      "label": "Unit cost",
+      "value": "CR 992/t",
+      "change": 7.8,
+      "depth": 2
+    },
+    {
+      "label": "Freight",
+      "value": "CR 184/t",
+      "change": 4.6,
+      "depth": 3
+    },
+    {
+      "label": "Lunar-orbit congestion",
+      "value": "81%",
+      "change": 9.4,
+      "depth": 4
+    }
+  ],
+  "watchlist": [
+    {
+      "commodity": "Water ice",
+      "location": "Moon",
+      "unit": "t",
+      "lastPrice": 308.25,
+      "change": 1.7
+    },
+    {
+      "commodity": "Liquid oxygen",
+      "location": "Lunar orbit",
+      "unit": "t",
+      "lastPrice": 521.35,
+      "change": 0.8
+    },
+    {
+      "commodity": "Structural alloy",
+      "location": "LEO",
+      "unit": "t",
+      "lastPrice": 1625,
+      "change": -0.4
+    },
+    {
+      "commodity": "Power",
+      "location": "Moon",
+      "unit": "MWh",
+      "lastPrice": 88.25,
+      "change": 0.9
+    }
+  ]
+}

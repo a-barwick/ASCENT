@@ -1,0 +1,58 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  background: var(--black);
+  font-family: var(--font-sans);
+  color: var(--text);
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background:
+    radial-gradient(circle at 50% -20%, rgb(100 130 145 / 8%), transparent 30rem), var(--black);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+a,
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:focus-visible {
+  outline: 1px solid var(--focus);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--text);
+  color: var(--black);
+}
+
+.positive {
+  color: var(--positive) !important;
+}
+
+.negative {
+  color: var(--negative) !important;
+}
+
+.warning {
+  color: var(--warning) !important;
+}

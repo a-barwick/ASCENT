@@ -1,0 +1,8 @@
+.git/
+node_modules/
+.pnpm-store/
+apps/web/.svelte-kit/
+apps/web/build/
+protocol/gen/
+fixtures/market.json
+docs/product/ASCENT_Product_and_Technical_Specification.docx

@@ -1,0 +1,5 @@
+packages:
+  - apps/web
+  - protocol
+minimumReleaseAgeExclude:
+  - "@sveltejs/kit@2.70.1"

@@ -1,0 +1,22 @@
+DROP TRIGGER IF EXISTS freight_deliveries_guard_update ON freight.deliveries;
+DROP TRIGGER IF EXISTS freight_deliveries_match_contract ON freight.deliveries;
+DROP TRIGGER IF EXISTS freight_contracts_match_deliveries ON freight.contracts;
+DROP FUNCTION IF EXISTS freight.guard_delivery_update();
+DROP FUNCTION IF EXISTS freight.assert_contract_delivery_total();
+DROP TABLE IF EXISTS freight.deliveries;
+DROP TABLE IF EXISTS freight.contracts;
+DROP TABLE IF EXISTS freight.routes;
+DROP SCHEMA IF EXISTS freight;
+
+DROP TRIGGER IF EXISTS production_job_journals_match ON production.job_journals;
+DROP TRIGGER IF EXISTS production_job_movements_match ON production.job_inventory_movements;
+DROP TRIGGER IF EXISTS production_jobs_require_effects ON production.jobs;
+DROP FUNCTION IF EXISTS production.assert_job_contract();
+DROP TABLE IF EXISTS production.job_journals;
+DROP TABLE IF EXISTS production.job_inventory_movements;
+DROP TABLE IF EXISTS production.jobs;
+DROP TABLE IF EXISTS production.facilities;
+DROP TABLE IF EXISTS production.recipe_inputs;
+DROP TABLE IF EXISTS production.recipes;
+DROP TABLE IF EXISTS production.facility_types;
+DROP SCHEMA IF EXISTS production;
