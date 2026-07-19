@@ -9,15 +9,11 @@ permissions:
   contents: read
 
 jobs:
-  code:
+  web:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: .go-version
-          cache: true
       - uses: pnpm/action-setup@v4
         with:
           version: 11.9.0
@@ -27,10 +23,3 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: make check
-
-  migrations:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v5
-      - run: make db-migration-test

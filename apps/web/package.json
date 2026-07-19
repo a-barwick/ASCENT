@@ -10,9 +10,6 @@
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run"
   },
-  "dependencies": {
-    "@ascent/protocol": "workspace:*"
-  },
   "devDependencies": {
     "@sveltejs/adapter-node": "5.5.7",
     "@sveltejs/kit": "2.70.1",

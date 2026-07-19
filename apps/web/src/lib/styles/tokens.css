@@ -5,11 +5,9 @@
   --surface: #080a0c;
   --surface-raised: #0c0f12;
   --surface-active: #12171b;
-  --surface-inset: #060708;
   --text: #f2f5f6;
   --text-muted: #9da6ac;
-  --text-dim: #707980;
-  --text-faint: #4e575d;
+  --text-dim: #7f8990;
   --border: #273038;
   --border-subtle: #181f24;
   --chart-primary: #dde8ed;
@@ -17,7 +15,6 @@
   --negative: #ef767a;
   --warning: #e8b86d;
   --info: #72a7d8;
-  --book-depth: rgb(91 116 130 / 12%);
   --focus: #a8d4f2;
 
   --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -40,7 +37,6 @@
   --space-6: 2rem;
 
   --panel-radius: 1px;
-  --control-height: 2.25rem;
   --topbar-height: 3rem;
   --ticker-height: 2.25rem;
 }

@@ -1,963 +1,653 @@
 <script lang="ts">
-  import {
-    PROTOCOL_VERSION,
-    type CommandEnvelope,
-    type CommandResultEnvelope,
-  } from "@ascent/protocol";
   import { onMount } from "svelte";
 
-  import { ApiError, GameClient, createCommandEnvelope, describeApiError } from "$lib/api/client";
-  import MarketChart from "$lib/components/market/MarketChart.svelte";
-  import OrderBook from "$lib/components/market/OrderBook.svelte";
-  import Panel from "$lib/components/terminal/Panel.svelte";
+  import DecisionConsole from "$lib/components/program/DecisionConsole.svelte";
+  import PhaseRail from "$lib/components/program/PhaseRail.svelte";
+  import ReadinessMatrix from "$lib/components/program/ReadinessMatrix.svelte";
+  import RiskGauge from "$lib/components/program/RiskGauge.svelte";
+  import Panel from "$lib/components/ui/Panel.svelte";
   import {
-    canIssueCommands,
-    freshnessAt,
-    type Freshness,
-    type Side,
-    type SnapshotSource,
-  } from "$lib/domain/game";
-  import { formatChange, formatCurrency, formatNumber, formatTime } from "$lib/domain/market";
+    advanceProgramClock,
+    applyDecision,
+    choiceById,
+    createInitialProgramState,
+    programAuthorization,
+    programDirector,
+    resolveCommitment,
+    type CommitmentDirective,
+    type DecisionChoiceId,
+  } from "$lib/domain/program";
 
-  let { data } = $props();
-  // The terminal owns its live projection after hydration; navigation does not replace command state.
-  // svelte-ignore state_referenced_locally
-  const initialData = data;
+  let program = $state(createInitialProgramState());
+  let selectedChoice = $state<DecisionChoiceId | null>(null);
+  let scenarioRevision = $state(0);
 
-  let envelope = $state(initialData.snapshot);
-  let source = $state<SnapshotSource>(initialData.source);
-  let authRequired = $state(initialData.authRequired);
-  let terminalMessage = $state<string | null>(initialData.message);
-  let actionError = $state<string | null>(null);
-  let actionSuccess = $state<string | null>(null);
-  let commandBusy = $state<string | null>(null);
-  let refreshing = $state(false);
-  let now = $state(Date.now());
-  let lastCommand = $state<CommandResultEnvelope | null>(null);
-  let retryCommand = $state<CommandEnvelope | null>(null);
-  let retryLabel = $state("");
-
-  const snapshot = $derived(envelope?.payload ?? null);
-  let selectedMarketId = $state(initialData.snapshot?.payload.markets.at(0)?.id ?? "");
-  const selectedMarket = $derived(
-    snapshot?.markets.find((market) => market.id === selectedMarketId) ??
-      snapshot?.markets.at(0) ??
-      null,
+  const activeChoice = $derived(choiceById(selectedChoice));
+  const displayedRisk = $derived(
+    !program.decisionResolved && activeChoice
+      ? clamp(program.missionRisk + activeChoice.riskDelta, 4, 92)
+      : program.missionRisk,
   );
-  const freshness = $derived.by<Freshness>(() => {
-    if (source === "fixture") return "expired";
-    if (source === "stale") return "stale";
-    return freshnessAt(envelope?.generatedAt, now);
-  });
-  const authorityReady = $derived(canIssueCommands(snapshot?.actor, freshness, source));
-  const commandsEnabled = $derived(authorityReady && commandBusy === null);
-  const sourceLabel = $derived(
-    source === "authority"
-      ? "Authoritative"
-      : source === "fixture"
-        ? "Fixture / degraded"
-        : source === "stale"
-          ? "Authority / stale"
-          : "Unavailable",
+  const displayedConfidence = $derived(
+    !program.decisionResolved && activeChoice
+      ? clamp(program.confidence + activeChoice.confidenceDelta, 5, 98)
+      : program.confidence,
   );
-  const commandGateReason = $derived(
-    authRequired
-      ? "Start an authenticated development session."
-      : source === "fixture"
-        ? "Fixture views are read-only."
-        : freshness !== "fresh"
-          ? "Commands pause while the snapshot is stale."
-          : "Waiting for the authority.",
+  const displayedWindowSeconds = $derived(program.windowSecondsRemaining);
+  const authorizationUsed = $derived(
+    Math.round((program.committedSpend / programAuthorization) * 1_000) / 10,
   );
-
-  let orderSide = $state<Side>("buy");
-  let orderPrice = $state(initialData.snapshot?.payload.markets.at(0)?.lastPrice ?? 0);
-  let orderQuantity = $state(25);
-  let productionFacilityId = $state(initialData.snapshot?.payload.facilities.at(0)?.id ?? "");
-  let productionQuantity = $state(40);
-  let deviceName = $state("");
-  let panelDeviceId = $state(initialData.snapshot?.payload.devices.at(0)?.id ?? "");
-  let panelId = $state(initialData.snapshot?.payload.panels.at(0)?.id ?? "");
-  let panelMessage = $state("");
-  let chatBody = $state("");
-  let compensationTarget = $state(initialData.snapshot?.payload.operatorAudit.at(0)?.id ?? "");
-  let compensationReason = $state("");
-
-  const client = new GameClient((input, init) => globalThis.fetch(input, init));
+  const readinessAverage = $derived(
+    Math.round(
+      program.readiness.reduce((total, item) => total + item.value, 0) / program.readiness.length,
+    ),
+  );
+  const openHolds = $derived(
+    program.signoffs.filter((signoff) => signoff.status === "hold").length,
+  );
+  const rivalWindowHours = $derived(31 + program.rivalDelayHours);
+  const missionClockLabel = $derived(program.outcome ? "Mission state" : "Primary window");
+  const missionClockValue = $derived(
+    program.outcome?.kind === "success"
+      ? "ON STATION"
+      : program.outcome?.kind === "failure"
+        ? "CONTINGENCY"
+        : program.outcome?.kind === "scrubbed"
+          ? "RELEASED"
+          : formatCountdown(displayedWindowSeconds),
+  );
+  const corridorState = $derived(
+    program.outcome?.kind === "success"
+      ? "USED"
+      : program.outcome?.kind === "failure"
+        ? "CLOSED"
+        : program.outcome?.kind === "scrubbed"
+          ? "RELEASED"
+          : "RESERVED",
+  );
+  const corridorDetail = $derived(
+    program.outcome?.kind === "success"
+      ? "Sagan Range · launch completed"
+      : program.outcome?.kind === "failure"
+        ? "Sagan Range · contingency response"
+        : program.outcome?.kind === "scrubbed"
+          ? "Sagan Range · vehicle stood down"
+          : `Sagan Range · closes ${formatCountdown(displayedWindowSeconds)}`,
+  );
+  const convoyState = $derived(
+    program.outcome?.kind === "success"
+      ? "EXPENDED"
+      : program.outcome?.kind === "failure"
+        ? "RECOVERY"
+        : program.outcome?.kind === "scrubbed"
+          ? "HOLD"
+          : "ON PAD",
+  );
+  const convoyDetail = $derived(
+    program.outcome?.kind === "success"
+      ? "Load complete · support released"
+      : program.outcome?.kind === "failure"
+        ? "Pad and feed systems safed"
+        : program.outcome?.kind === "scrubbed"
+          ? "Return plan pending"
+          : "Lattice Transit · seal chain intact",
+  );
+  const missionCondition = $derived(
+    program.outcome?.kind === "success"
+      ? "DELIVERED"
+      : program.outcome?.kind === "failure"
+        ? "RECOVERY"
+        : program.outcome?.kind === "scrubbed"
+          ? "STAND DOWN"
+          : "73% GO",
+  );
+  const rangeCondition = $derived(
+    program.outcome?.kind === "success"
+      ? "COMPLETE"
+      : program.outcome?.kind === "failure"
+        ? "RESPONSE"
+        : program.outcome?.kind === "scrubbed"
+          ? "RELEASED"
+          : "GREEN",
+  );
+  const rivalCondition = $derived(
+    program.outcome?.kind === "success"
+      ? `+${rivalWindowHours}H`
+      : program.outcome
+        ? "ADVANTAGE"
+        : `+${rivalWindowHours}H`,
+  );
+  const missionConditionTone = $derived(
+    program.outcome?.kind === "failure"
+      ? "negative"
+      : program.outcome?.kind === "scrubbed"
+        ? "warning"
+        : "positive",
+  );
+  const missionStateLabel = $derived(
+    program.outcome?.kind === "success"
+      ? "COMPLETE"
+      : program.outcome?.kind === "failure"
+        ? "INVESTIGATION"
+        : program.outcome?.kind === "scrubbed"
+          ? "STAND DOWN"
+          : program.decisionResolved
+            ? "GATE 4"
+            : "HOLD",
+  );
+  const gateStatus = $derived(
+    program.outcome
+      ? program.outcome.kind
+      : program.decisionResolved
+        ? "Director poll open"
+        : "Program hold",
+  );
 
   onMount(() => {
+    let observedAt = Date.now();
+    let remainderMilliseconds = 0;
     const timer = window.setInterval(() => {
-      now = Date.now();
-    }, 1_000);
-    const poller = window.setInterval(() => {
-      void pollEvents();
-    }, 5_000);
-    return () => {
-      window.clearInterval(timer);
-      window.clearInterval(poller);
-    };
+      const now = Date.now();
+      const elapsedMilliseconds = Math.max(0, now - observedAt) + remainderMilliseconds;
+      const elapsedSeconds = Math.floor(elapsedMilliseconds / 1_000);
+      observedAt = now;
+      remainderMilliseconds = elapsedMilliseconds - elapsedSeconds * 1_000;
+      if (elapsedSeconds > 0) {
+        program = advanceProgramClock(program, elapsedSeconds);
+      }
+    }, 250);
+    return () => window.clearInterval(timer);
   });
 
-  function chooseMarket(marketId: string): void {
-    selectedMarketId = marketId;
-    const market = snapshot?.markets.find((candidate) => candidate.id === marketId);
-    if (market) orderPrice = market.lastPrice;
-  }
-
-  function marketLabel(marketId: string): string {
-    const market = snapshot?.markets.find((candidate) => candidate.id === marketId);
-    return market ? `${market.commodity} / ${market.location}` : marketId;
-  }
-
-  async function startSession(): Promise<void> {
-    actionError = null;
-    actionSuccess = null;
-    commandBusy = "session";
-    try {
-      await client.createDevSession();
-      authRequired = false;
-      if (await refreshGame(false)) {
-        actionSuccess = "Development operator session authenticated.";
-      } else {
-        actionError = terminalMessage ?? "The session started, but the game snapshot did not load.";
-      }
-    } catch (error) {
-      actionError = describeApiError(error);
-    } finally {
-      commandBusy = null;
-    }
-  }
-
-  async function refreshGame(showLoading = true): Promise<boolean> {
-    if (showLoading) refreshing = true;
-    try {
-      const nextEnvelope = await client.getGame();
-      envelope = nextEnvelope;
-      source = "authority";
-      authRequired = false;
-      terminalMessage = null;
-      actionError = null;
-      if (!nextEnvelope.payload.markets.some((market) => market.id === selectedMarketId)) {
-        chooseMarket(nextEnvelope.payload.markets.at(0)?.id ?? "");
-      }
-      if (
-        !nextEnvelope.payload.facilities.some((facility) => facility.id === productionFacilityId)
-      ) {
-        productionFacilityId = nextEnvelope.payload.facilities.at(0)?.id ?? "";
-      }
-      if (!nextEnvelope.payload.devices.some((device) => device.id === panelDeviceId)) {
-        panelDeviceId = nextEnvelope.payload.devices.at(0)?.id ?? "";
-      }
-      if (!nextEnvelope.payload.panels.some((panel) => panel.id === panelId)) {
-        panelId = nextEnvelope.payload.panels.at(0)?.id ?? "";
-      }
-      if (!nextEnvelope.payload.operatorAudit.some((entry) => entry.id === compensationTarget)) {
-        compensationTarget = nextEnvelope.payload.operatorAudit.at(0)?.id ?? "";
-      }
-      return true;
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) authRequired = true;
-      source = envelope ? "stale" : "unavailable";
-      terminalMessage = describeApiError(error);
-      return false;
-    } finally {
-      refreshing = false;
-    }
-  }
-
-  async function pollEvents(): Promise<void> {
-    if (!envelope || authRequired || source === "fixture" || commandBusy) return;
-    try {
-      const batch = await client.getEvents(envelope.sequence);
-      if (batch.latestSequence > envelope.sequence || source === "stale") {
-        await refreshGame(false);
-      }
-    } catch (error) {
-      source = "stale";
-      terminalMessage = describeApiError(error);
-    }
-  }
-
-  async function issueCommand(
-    type: string,
-    payload: Record<string, unknown>,
-    successLabel: string,
-  ): Promise<void> {
-    if (!snapshot || !authorityReady) {
-      actionError = commandGateReason;
+  function authorizeDecision(): void {
+    if (
+      !selectedChoice ||
+      program.decisionResolved ||
+      program.outcome ||
+      program.windowSecondsRemaining <= 0
+    ) {
       return;
     }
-    const command = createCommandEnvelope(type, payload, {
-      actorId: snapshot.actor.id,
-      companyId: snapshot.membership.companyId,
-      expectedVersion: snapshot.company.version,
-    });
-    await submitCommand(command, successLabel);
+    program = applyDecision(program, selectedChoice);
   }
 
-  async function submitCommand(command: CommandEnvelope, successLabel: string): Promise<void> {
-    actionError = null;
-    actionSuccess = null;
-    commandBusy = command.type;
-    try {
-      const result = await client.sendCommand(command);
-      lastCommand = result;
-      if (result.status === "rejected" || result.status === "failed") {
-        actionError = result.safeMessage ?? `Command ${result.status}.`;
-        retryCommand = null;
-        return;
-      }
-      retryCommand = null;
-      actionSuccess = `${successLabel} ${result.status}. No balance is shown until the authority refreshes.`;
-      await refreshGame(false);
-    } catch (error) {
-      actionError = describeApiError(error);
-      retryCommand = error instanceof ApiError && error.retryable ? command : null;
-      retryLabel = successLabel;
-      source = envelope ? "stale" : "unavailable";
-    } finally {
-      commandBusy = null;
+  function commit(directive: CommitmentDirective): void {
+    if (program.outcome || program.windowSecondsRemaining <= 0) return;
+    program = resolveCommitment(program, directive, Math.random());
+  }
+
+  function resetScenario(): void {
+    program = createInitialProgramState();
+    selectedChoice = null;
+    scenarioRevision += 1;
+    window.scrollTo({ top: 0 });
+  }
+
+  function formatCountdown(totalSeconds: number): string {
+    const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+    const hours = Math.floor(safeSeconds / 3_600);
+    const minutes = Math.floor((safeSeconds % 3_600) / 60);
+    const seconds = safeSeconds % 60;
+    return `T−${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  function formatCredits(value: number): string {
+    const absolute = Math.abs(value);
+    const prefix = value < 0 ? "−" : "";
+    if (absolute >= 1_000_000_000) {
+      return `${prefix}${(absolute / 1_000_000_000).toFixed(2)}B CR`;
     }
+    return `${prefix}${Math.round(absolute / 1_000_000)}M CR`;
   }
 
-  async function placeOrder(event: SubmitEvent): Promise<void> {
-    event.preventDefault();
-    if (!selectedMarket || orderPrice <= 0 || orderQuantity <= 0) {
-      actionError = "Price and quantity must both be greater than zero.";
-      return;
-    }
-    await issueCommand(
-      "market.place_order",
-      {
-        marketId: selectedMarket.id,
-        side: orderSide,
-        orderType: "limit",
-        price: orderPrice,
-        quantity: orderQuantity,
-      },
-      "Limit order",
-    );
+  function formatSignedCredits(value: number): string {
+    return `${value >= 0 ? "+" : "−"}${formatCredits(Math.abs(value))}`;
   }
 
-  async function cancelOrder(orderId: string): Promise<void> {
-    await issueCommand("market.cancel_order", { orderId }, "Order cancellation");
-  }
-
-  async function runProduction(event: SubmitEvent): Promise<void> {
-    event.preventDefault();
-    if (!productionFacilityId || productionQuantity <= 0) {
-      actionError = "Choose a facility and enter a positive production quantity.";
-      return;
-    }
-    await issueCommand(
-      "production.run",
-      { facilityId: productionFacilityId, quantity: productionQuantity },
-      "Production run",
-    );
-  }
-
-  async function deliverFreight(shipmentId: string): Promise<void> {
-    await issueCommand("freight.deliver", { shipmentId }, "Freight delivery");
-  }
-
-  async function registerDevice(event: SubmitEvent): Promise<void> {
-    event.preventDefault();
-    const name = deviceName.trim();
-    if (!name) {
-      actionError = "Enter a device name.";
-      return;
-    }
-    await issueCommand(
-      "device.register",
-      { name, capabilities: ["panel.receive"] },
-      "Device registration",
-    );
-    if (!actionError) deviceName = "";
-  }
-
-  async function sendPanel(event: SubmitEvent): Promise<void> {
-    event.preventDefault();
-    const message = panelMessage.trim();
-    if (!panelDeviceId || !panelId || !message) {
-      actionError = "Choose a device and panel and enter a message.";
-      return;
-    }
-    await issueCommand(
-      "device.panel_send",
-      { deviceId: panelDeviceId, panelId, message },
-      "Panel message",
-    );
-    if (!actionError) panelMessage = "";
-  }
-
-  async function sendChat(event: SubmitEvent): Promise<void> {
-    event.preventDefault();
-    const body = chatBody.trim();
-    if (!body) {
-      actionError = "Enter a company operations message.";
-      return;
-    }
-    await issueCommand("chat.send", { channelId: "company-operations", body }, "Chat message");
-    if (!actionError) chatBody = "";
-  }
-
-  async function compensate(event: SubmitEvent): Promise<void> {
-    event.preventDefault();
-    const reason = compensationReason.trim();
-    if (!compensationTarget || !reason) {
-      actionError = "Choose an audit event and record a compensation reason.";
-      return;
-    }
-    await issueCommand(
-      "operator.compensate",
-      { targetEventId: compensationTarget, reason },
-      "Compensating command",
-    );
-    if (!actionError) compensationReason = "";
+  function clamp(value: number, minimum: number, maximum: number): number {
+    return Math.min(maximum, Math.max(minimum, value));
   }
 </script>
 
 <svelte:head>
-  <title>ASCENT / Cislunar Operations</title>
+  <title>ASCENT / ORPHEUS-1 Program Control</title>
   <meta
     name="description"
-    content="Operate a cislunar industrial company across markets, production, freight, and company systems."
+    content="Direct a flight-critical industrial program through readiness and commitment."
   />
 </svelte:head>
 
-<div class="terminal-shell" aria-busy={refreshing || commandBusy !== null}>
+<div class="program-shell">
   <header class="topbar">
-    <a class="brand" href="/" aria-label="ASCENT terminal home">
+    <a class="brand" href="/" aria-label="ASCENT program control home">
       <img src="/ascent-mark.svg" alt="" />
       <span>ASCENT</span>
     </a>
-    <div class="system-time">
-      <span>Simulation time</span>
-      <strong>{snapshot?.systemTime ?? "Awaiting authority"}</strong>
+    <div class="program-identity">
+      <span>Program control</span>
+      <strong>ORPHEUS-1 / LC-01</strong>
     </div>
-    <nav aria-label="Primary terminal">
-      <a class="active" href="#company">Company</a>
-      <a href="#markets">Markets</a>
-      <a href="#production">Production</a>
-      <a href="#network">Network</a>
-      <a href="#operator">Operator</a>
+    <div
+      class="commitment-clock"
+      class:clock-critical={!program.outcome && displayedWindowSeconds < 10_800}
+    >
+      <span>{missionClockLabel}</span>
+      <strong>{missionClockValue}</strong>
+    </div>
+    <nav aria-label="Program sections">
+      <a href="#program">Program</a>
+      <a href="#readiness">Readiness</a>
+      <a href="#supply">Supply</a>
+      <a href="#commitment">Commit</a>
     </nav>
     <div class="identity">
-      <span class:status-warning={source !== "authority"} class="connection__dot"></span>
-      <span>{snapshot?.actor.displayName ?? "No session"}</span>
-      <strong>{sourceLabel} · v{PROTOCOL_VERSION}</strong>
+      <span class="connection__dot"></span>
+      <span>{programDirector}</span>
+      <strong>Scenario sandbox</strong>
     </div>
   </header>
 
-  <div class="terminal-notices" aria-live="polite">
-    {#if source !== "authority" || freshness !== "fresh" || terminalMessage}
-      <section class="notice notice--warning">
-        <div>
-          <strong>{sourceLabel}</strong>
-          <span>
-            {terminalMessage ??
-              `Snapshot ${freshness}; sequence ${envelope?.sequence ?? "unavailable"}.`}
-          </span>
-        </div>
-        {#if authRequired}
-          <button type="button" onclick={() => void startSession()} disabled={commandBusy !== null}>
-            Start dev session
-          </button>
-        {:else}
-          <button type="button" onclick={() => void refreshGame()} disabled={refreshing}>
-            {refreshing ? "Refreshing…" : "Retry authority"}
-          </button>
-        {/if}
-      </section>
-    {/if}
-    {#if commandBusy}
-      <section class="notice">
-        <strong>Command pending</strong>
-        <span>{commandBusy} is awaiting an authoritative result.</span>
-      </section>
-    {/if}
-    {#if actionError}
-      <section class="notice notice--error" role="alert">
-        <div>
-          <strong>Command not confirmed</strong>
-          <span>{actionError}</span>
-        </div>
-        {#if retryCommand}
-          <button
-            type="button"
-            disabled={!authorityReady || commandBusy !== null}
-            onclick={() => retryCommand && void submitCommand(retryCommand, retryLabel)}
-          >
-            Retry same key
-          </button>
-        {/if}
-      </section>
-    {/if}
-    {#if actionSuccess}
-      <section class="notice notice--success">
-        <strong>Authority receipt</strong>
-        <span>{actionSuccess}</span>
-        {#if lastCommand}<code>{lastCommand.commandId}</code>{/if}
-      </section>
-    {/if}
-  </div>
-
-  {#if snapshot}
-    <main class="workspace">
-      <Panel
-        title="Company & identity"
-        eyebrow="Authenticated context"
-        status={snapshot.membership.role}
-        class="company-panel"
-      >
-        <div class="company-name" id="company">
-          <span>Operating company</span>
-          <strong>{snapshot.company.name}</strong>
-          <small>{snapshot.actor.displayName} · {snapshot.actor.id}</small>
-        </div>
-        <div class="metric-grid">
-          <div class="metric metric--wide">
-            <span>Cash / ledger projection</span>
-            <strong>{formatCurrency(snapshot.company.cash, true)}</strong>
-            <small>Snapshot v{snapshot.company.version}</small>
-          </div>
-          <div class="metric">
-            <span>Total assets</span>
-            <strong>{formatCurrency(snapshot.company.totalAssets, true)}</strong>
-          </div>
-          <div class="metric">
-            <span>Liabilities</span>
-            <strong>{formatCurrency(snapshot.company.totalLiabilities, true)}</strong>
-          </div>
-          <div class="metric">
-            <span>Net worth</span>
-            <strong>{formatCurrency(snapshot.company.netWorth, true)}</strong>
-          </div>
-          <div class="metric">
-            <span>Credit</span>
-            <strong>{snapshot.company.creditRating}</strong>
-            <small>{formatCurrency(snapshot.company.availableCredit, true)} available</small>
-          </div>
-        </div>
-        <ul class="statement-list" aria-label="Company operating statement">
-          {#each snapshot.company.statements as statement}
-            <li>
-              <span>{statement.label}</span>
-              <strong>{formatCurrency(statement.value, true)}</strong>
-              {#if statement.change !== null}
-                <small class:positive={statement.change > 0} class:negative={statement.change < 0}>
-                  {formatChange(statement.change)}
-                </small>
-              {/if}
-            </li>
-          {:else}
-            <li class="empty-state">No statement periods have closed.</li>
-          {/each}
-        </ul>
-      </Panel>
-
-      <Panel
-        title={selectedMarket
-          ? `${selectedMarket.commodity} / ${selectedMarket.location}`
-          : "Markets"}
-        eyebrow="Two-location spot exchange"
-        status={`${sourceLabel} · seq ${envelope?.sequence ?? "—"}`}
-        class="chart-panel"
-      >
-        <div class="segmented" id="markets" aria-label="Market location">
-          {#each snapshot.markets as market}
-            <button
-              type="button"
-              class:active={market.id === selectedMarket?.id}
-              aria-pressed={market.id === selectedMarket?.id}
-              onclick={() => chooseMarket(market.id)}
-            >
-              <span>{market.commodity}</span>
-              <small>{market.location}</small>
-            </button>
-          {:else}
-            <p class="empty-state">No markets are open in this snapshot.</p>
-          {/each}
-        </div>
-        {#if selectedMarket}
-          <div class="market-summary">
-            <div>
-              <span>Last</span>
-              <strong>{formatNumber(selectedMarket.lastPrice, 2)}</strong>
-              <small>{selectedMarket.currency} / {selectedMarket.unit}</small>
-            </div>
-            <div>
-              <span>24h change</span>
-              <strong
-                class:positive={selectedMarket.change24Hour > 0}
-                class:negative={selectedMarket.change24Hour < 0}
-              >
-                {formatChange(selectedMarket.change24Hour)}
-              </strong>
-            </div>
-            <div>
-              <span>Volume</span>
-              <strong>{formatNumber(selectedMarket.volume24Hour, 0)}</strong>
-              <small>{selectedMarket.unit}</small>
-            </div>
-            <div>
-              <span>Spread</span>
-              <strong>{formatNumber(selectedMarket.spread, 2)}</strong>
-              <small>{selectedMarket.currency}</small>
-            </div>
-          </div>
-          <MarketChart
-            history={selectedMarket.history}
-            unit={selectedMarket.unit}
-            label={`${selectedMarket.commodity} at ${selectedMarket.location}`}
-          />
-        {/if}
-      </Panel>
-
-      <Panel
-        title="Order book"
-        eyebrow="Committed limit orders"
-        status={selectedMarket?.location ?? "No market"}
-        class="book-panel"
-      >
-        {#if selectedMarket}
-          <OrderBook
-            book={selectedMarket.orderBook}
-            currency={selectedMarket.currency}
-            unit={selectedMarket.unit}
-          />
-        {:else}
-          <p class="empty-state">Select an active market to inspect its book.</p>
-        {/if}
-      </Panel>
-
-      <Panel
-        title="Order ticket"
-        eyebrow="Economic command"
-        status="Limit only"
-        class="order-panel"
-      >
-        <form class="command-form" onsubmit={placeOrder}>
-          <fieldset disabled={!commandsEnabled}>
-            <label>
-              <span>Side</span>
-              <select bind:value={orderSide}>
-                <option value="buy">Buy</option>
-                <option value="sell">Sell</option>
-              </select>
-            </label>
-            <label>
-              <span>Limit price / CR</span>
-              <input type="number" min="0.01" step="0.01" bind:value={orderPrice} required />
-            </label>
-            <label>
-              <span>Quantity / {selectedMarket?.unit ?? "unit"}</span>
-              <input type="number" min="0.01" step="0.01" bind:value={orderQuantity} required />
-            </label>
-            <div class="command-summary">
-              <span>Maximum notional</span>
-              <strong>{formatCurrency(orderPrice * orderQuantity, false)}</strong>
-            </div>
-            <button class="primary-control" type="submit">
-              {commandBusy === "market.place_order" ? "Awaiting authority…" : "Submit limit order"}
-            </button>
-          </fieldset>
-          {#if !commandsEnabled}<small class="form-note">{commandGateReason}</small>{/if}
-        </form>
-      </Panel>
-
-      <Panel
-        title="Open orders"
-        eyebrow="Company exposure"
-        status={`${snapshot.openOrders.length} active`}
-        class="orders-panel"
-      >
-        <div class="table-scroll">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th scope="col">Market</th>
-                <th scope="col">Side</th>
-                <th scope="col">Price</th>
-                <th scope="col">Open</th>
-                <th scope="col">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each snapshot.openOrders as order}
-                <tr>
-                  <th scope="row">{marketLabel(order.marketId)}</th>
-                  <td class:positive={order.side === "buy"} class:negative={order.side === "sell"}>
-                    {order.side}
-                  </td>
-                  <td>{formatNumber(order.price, 2)}</td>
-                  <td>{formatNumber(order.quantity - order.filledQuantity, 2)}</td>
-                  <td>
-                    <button
-                      class="table-action"
-                      type="button"
-                      disabled={!commandsEnabled}
-                      onclick={() => void cancelOrder(order.id)}
-                    >
-                      Cancel
-                    </button>
-                  </td>
-                </tr>
-              {:else}
-                <tr><td class="empty-state" colspan="5">No open company orders.</td></tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
-
-      <Panel
-        title="Trade tape"
-        eyebrow="Committed fills"
-        status={`${snapshot.trades.length} recent`}
-        class="trades-panel"
-      >
-        <ol class="activity-list">
-          {#each snapshot.trades as trade}
-            <li>
-              <div>
-                <strong
-                  class:positive={trade.side === "buy"}
-                  class:negative={trade.side === "sell"}
-                >
-                  {trade.side}
-                  {formatNumber(trade.quantity, 2)}
-                </strong>
-                <span>{marketLabel(trade.marketId)}</span>
-              </div>
-              <div>
-                <strong>{formatNumber(trade.price, 2)} CR</strong>
-                <time datetime={trade.occurredAt}>{formatTime(trade.occurredAt)}Z</time>
-              </div>
-            </li>
-          {:else}
-            <li class="empty-state">No committed trades in this window.</li>
-          {/each}
-        </ol>
-      </Panel>
-
-      <Panel
-        title="Inventory"
-        eyebrow="Location custody"
-        status={`${snapshot.inventory.length} positions`}
-        class="inventory-panel"
-      >
-        <div class="table-scroll">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th scope="col">Commodity</th>
-                <th scope="col">Location</th>
-                <th scope="col">Available</th>
-                <th scope="col">Reserved</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each snapshot.inventory as position}
-                <tr>
-                  <th scope="row">{position.commodity}</th>
-                  <td>{position.location}</td>
-                  <td>{formatNumber(position.quantity - position.reserved, 1)} {position.unit}</td>
-                  <td>{formatNumber(position.reserved, 1)} {position.unit}</td>
-                </tr>
-              {:else}
-                <tr><td class="empty-state" colspan="4">No inventory positions.</td></tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
-
-      <Panel
-        title="Facilities & production"
-        eyebrow="Inputs become outputs"
-        status={`${snapshot.facilities.length} facilities`}
-        class="production-panel"
-      >
-        <div class="production-layout" id="production">
-          <div class="capacity-list">
-            {#each snapshot.facilities as facility}
-              <article class="capacity-row">
-                <div>
-                  <strong>{facility.name}</strong>
-                  <span>{facility.inputCommodity} → {facility.outputCommodity}</span>
-                </div>
-                <div class="capacity-bar" aria-label={`${facility.utilization}% utilized`}>
-                  <span style={`width:${Math.min(100, Math.max(0, facility.utilization))}%`}></span>
-                </div>
-                <b>{facility.utilization}%</b>
-                <small class:warning={facility.status !== "operational"}>{facility.status}</small>
-              </article>
-            {:else}
-              <p class="empty-state">No facilities assigned to this company.</p>
-            {/each}
-          </div>
-          <form class="command-form compact-form" onsubmit={runProduction}>
-            <fieldset disabled={!commandsEnabled || snapshot.facilities.length === 0}>
-              <label>
-                <span>Facility</span>
-                <select bind:value={productionFacilityId}>
-                  {#each snapshot.facilities as facility}
-                    <option value={facility.id}>{facility.name}</option>
-                  {/each}
-                </select>
-              </label>
-              <label>
-                <span>Run quantity</span>
-                <input
-                  type="number"
-                  min="0.01"
-                  step="0.01"
-                  bind:value={productionQuantity}
-                  required
-                />
-              </label>
-              <button class="primary-control" type="submit">Schedule production run</button>
-            </fieldset>
-          </form>
-        </div>
-        <ol class="trace" aria-label="Production and profitability trace">
-          {#each snapshot.productionTrace as node}
-            <li style={`--depth:${node.depth}`}>
-              <span>{node.label}</span>
-              <strong>{node.value}</strong>
-              <small class:positive={node.change > 0} class:negative={node.change < 0}>
-                {formatChange(node.change)}
-              </small>
-            </li>
-          {:else}
-            <li class="empty-state">No production trace is available.</li>
-          {/each}
-        </ol>
-      </Panel>
-
-      <Panel
-        title="Freight"
-        eyebrow="Location settlement"
-        status={`${snapshot.freight.length} shipments`}
-        class="freight-panel"
-      >
-        <ol class="activity-list">
-          {#each snapshot.freight as shipment}
-            <li>
-              <div>
-                <strong
-                  >{shipment.cargo} · {formatNumber(shipment.quantity, 1)} {shipment.unit}</strong
-                >
-                <span>{shipment.origin} → {shipment.destination}</span>
-              </div>
-              <div>
-                <span class:positive={shipment.status === "delivered"}>{shipment.status}</span>
-                {#if shipment.status === "ready"}
-                  <button
-                    class="table-action"
-                    type="button"
-                    disabled={!commandsEnabled}
-                    onclick={() => void deliverFreight(shipment.id)}
-                  >
-                    Deliver
-                  </button>
-                {:else}
-                  <time datetime={shipment.eta}>{formatTime(shipment.eta)}Z</time>
-                {/if}
-              </div>
-            </li>
-          {:else}
-            <li class="empty-state">No freight assigned.</li>
-          {/each}
-        </ol>
-      </Panel>
-
-      <Panel
-        title="Devices & panels"
-        eyebrow="Disposable display edge"
-        status={`${snapshot.devices.length} registered`}
-        class="device-panel"
-      >
-        <div id="network" class="device-list">
-          {#each snapshot.devices as device}
-            <div>
-              <span class:positive={device.status === "online"}>{device.status}</span>
-              <strong>{device.name}</strong>
-              <small>{device.capabilities.join(", ") || "No capabilities"}</small>
-            </div>
-          {:else}
-            <p class="empty-state">No registered devices.</p>
-          {/each}
-        </div>
-        <form class="command-form compact-form" onsubmit={registerDevice}>
-          <fieldset disabled={!commandsEnabled}>
-            <label>
-              <span>Register display device</span>
-              <input bind:value={deviceName} maxlength="60" placeholder="Flight desk display" />
-            </label>
-            <button type="submit">Register</button>
-          </fieldset>
-        </form>
-        <form class="command-form compact-form panel-form" onsubmit={sendPanel}>
-          <fieldset disabled={!commandsEnabled || snapshot.panels.length === 0}>
-            <label>
-              <span>Device</span>
-              <select bind:value={panelDeviceId}>
-                {#each snapshot.devices as device}
-                  <option value={device.id}>{device.name}</option>
-                {/each}
-              </select>
-            </label>
-            <label>
-              <span>Panel</span>
-              <select bind:value={panelId}>
-                {#each snapshot.panels as panel}
-                  <option value={panel.id}>{panel.name}</option>
-                {/each}
-              </select>
-            </label>
-            <label class="full-field">
-              <span>Message</span>
-              <input bind:value={panelMessage} maxlength="160" placeholder="Operational brief" />
-            </label>
-            <button class="primary-control full-field" type="submit">Send to panel</button>
-          </fieldset>
-        </form>
-      </Panel>
-
-      <Panel
-        title="Company operations chat"
-        eyebrow="Coordination"
-        status={`${snapshot.chat.length} messages`}
-        class="chat-panel"
-      >
-        <ol class="chat-log">
-          {#each snapshot.chat as message}
-            <li class:system-message={message.kind === "system"}>
-              <div>
-                <strong>{message.actorName}</strong>
-                <time datetime={message.occurredAt}>{formatTime(message.occurredAt)}Z</time>
-              </div>
-              <p>{message.body}</p>
-            </li>
-          {:else}
-            <li class="empty-state">No messages in company operations.</li>
-          {/each}
-        </ol>
-        <form class="chat-form" onsubmit={sendChat}>
-          <label>
-            <span class="sr-only">Company operations message</span>
-            <input bind:value={chatBody} maxlength="500" placeholder="Message company operations" />
-          </label>
-          <button type="submit" disabled={!commandsEnabled}>Send</button>
-        </form>
-      </Panel>
-
-      <Panel
-        title="Operator audit"
-        eyebrow="Committed command trace"
-        status={`${snapshot.operatorAudit.length} entries`}
-        class="operator-panel"
-      >
-        <ol class="audit-log" id="operator">
-          {#each snapshot.operatorAudit as entry}
-            <li>
-              <span class:positive={entry.outcome === "committed"}>{entry.outcome}</span>
-              <strong>{entry.action}</strong>
-              <small>{entry.actorName} · {entry.target} · {formatTime(entry.occurredAt)}Z</small>
-            </li>
-          {:else}
-            <li class="empty-state">No operator activity in this window.</li>
-          {/each}
-        </ol>
-        {#if snapshot.membership.permissions.includes("operator.compensate")}
-          <form class="command-form compact-form compensation-form" onsubmit={compensate}>
-            <fieldset disabled={!commandsEnabled || snapshot.operatorAudit.length === 0}>
-              <label>
-                <span>Compensate event</span>
-                <select bind:value={compensationTarget}>
-                  {#each snapshot.operatorAudit as entry}
-                    <option value={entry.id}>{entry.action} / {entry.target}</option>
-                  {/each}
-                </select>
-              </label>
-              <label>
-                <span>Reason</span>
-                <input
-                  bind:value={compensationReason}
-                  maxlength="240"
-                  placeholder="Required audit reason"
-                />
-              </label>
-              <button class="danger-control" type="submit">Issue compensation</button>
-            </fieldset>
-          </form>
-        {/if}
-      </Panel>
-
-      <Panel
-        title="Alerts"
-        eyebrow="Economic and system exceptions"
-        status={`${snapshot.alerts.length} open`}
-        class="alerts-panel"
-      >
-        <ul class="incidents">
-          {#each snapshot.alerts as alert}
-            <li>
-              <span
-                class:warning={alert.severity === "warning"}
-                class:negative={alert.severity === "critical"}
-              >
-                {alert.severity}
-              </span>
-              <strong>{alert.summary}</strong>
-              <time datetime={alert.occurredAt}>{formatTime(alert.occurredAt)}Z</time>
-            </li>
-          {:else}
-            <li class="empty-state">No open alerts.</li>
-          {/each}
-        </ul>
-      </Panel>
-    </main>
-
-    <footer class="ticker" aria-label="Market indices and snapshot freshness">
-      {#each snapshot.indices as index}
-        <div>
-          <span>{index.name}</span>
-          <strong>{formatNumber(index.value, 1)}</strong>
-          <small class:positive={index.change > 0} class:negative={index.change < 0}>
-            {formatChange(index.change)}
-          </small>
-        </div>
-      {/each}
-      <p>
-        {sourceLabel} · {freshness} · seq {envelope?.sequence ?? "—"} · generated
-        {envelope ? formatTime(envelope.generatedAt) : "—"}Z
-      </p>
-    </footer>
-  {:else}
-    <main class="terminal-unavailable">
-      <section>
-        <span>Authority state</span>
-        <h1>{authRequired ? "Operator session required" : "Terminal unavailable"}</h1>
-        <p>{terminalMessage ?? "No game snapshot could be loaded."}</p>
-        <button
-          class="primary-control"
-          type="button"
-          onclick={() => void (authRequired ? startSession() : refreshGame())}
-        >
-          {authRequired ? "Start development session" : "Retry authority"}
-        </button>
-      </section>
-    </main>
+  {#if program.outcome}
+    <section class={`outcome-banner outcome-banner--${program.outcome.kind}`} aria-live="polite">
+      <div>
+        <span>{program.outcome.eyebrow}</span>
+        <strong>{program.outcome.headline}</strong>
+        <p>{program.outcome.summary}</p>
+      </div>
+      <div class="outcome-impact">
+        <span>Contract impact</span>
+        <strong>{formatSignedCredits(program.outcome.contractDelta)}</strong>
+        <span>Reputation</span>
+        <strong>
+          {program.outcome.reputationDelta > 0 ? "+" : ""}{program.outcome.reputationDelta}
+        </strong>
+      </div>
+      <button type="button" onclick={resetScenario}>Replay gate</button>
+    </section>
   {/if}
 
-  <nav class="mobile-nav" aria-label="Mobile terminal">
-    <a href="#company">Company</a>
-    <a href="#markets">Trade</a>
-    <a href="#production">Produce</a>
-    <a href="#network">Network</a>
-    <a href="#operator">Audit</a>
+  <main class="program-workspace">
+    <section class="panel mission-hero" id="program" aria-labelledby="mission-title">
+      <div class="mission-heading">
+        <div>
+          <span class="section-kicker">Mandate 07 / Cislunar infrastructure</span>
+          <div class="mission-title-row">
+            <h1 id="mission-title">ORPHEUS-1</h1>
+            <span
+              class:status-go={program.outcome?.kind === "success" ||
+                (program.decisionResolved && !program.outcome)}
+              class:status-failure={program.outcome?.kind === "failure"}
+              class:status-scrubbed={program.outcome?.kind === "scrubbed"}
+              class="mission-state"
+            >
+              {missionStateLabel}
+            </span>
+          </div>
+          <p>
+            Deploy Pioneer Tug to lunar orbit and commission the first autonomous cargo link before
+            Vantage Orbital captures the customer’s expansion mandate.
+          </p>
+        </div>
+        <div class="mandate-stakes">
+          <span>Customer</span>
+          <strong>Coalition Logistics Authority</strong>
+          <small>6.80B CR award · 640M CR on-time bonus</small>
+        </div>
+      </div>
+
+      <div class="mission-metrics">
+        <div>
+          <span>Committed program spend</span>
+          <strong>{formatCredits(program.committedSpend)}</strong>
+          <small>{authorizationUsed}% of authorization</small>
+        </div>
+        <div>
+          <span>Contingency remaining</span>
+          <strong>{formatCredits(program.contingencyRemaining)}</strong>
+          <small
+            >{Math.round((program.contingencyRemaining / 286_000_000) * 100)}% unallocated</small
+          >
+        </div>
+        <div>
+          <span>Modeled loss exposure</span>
+          <strong>{program.missionRisk}%</strong>
+          <small>{program.decisionResolved ? "After disposition" : "Before disposition"}</small>
+        </div>
+        <div>
+          <span>Readiness confidence</span>
+          <strong>{program.confidence}%</strong>
+          <small>{readinessAverage}% system evidence</small>
+        </div>
+      </div>
+
+      <PhaseRail current={program.phase} />
+
+      <div class="mission-brief">
+        <div>
+          <span>Today’s commitment</span>
+          <strong>Release the integrated stack—or protect the company from a bad launch.</strong>
+        </div>
+        <p>
+          One unexplained bearing signature now sits between four years of industrial work and the
+          most valuable cargo mandate in cislunar space. The trail begins with a supplier shortcut
+          approved 118 days ago.
+        </p>
+      </div>
+    </section>
+
+    <Panel
+      title="Turbopump bearing disposition"
+      eyebrow="Active director decision"
+      status={program.decisionResolved
+        ? "Resolved"
+        : program.outcome
+          ? "Closed"
+          : "HOLD / action due"}
+      class="decision-panel"
+    >
+      {#key scenarioRevision}
+        <DecisionConsole
+          selected={selectedChoice}
+          resolved={program.decisionResolved}
+          locked={Boolean(program.outcome)}
+          onselect={(choice) => (selectedChoice = choice)}
+          onconfirm={authorizeDecision}
+        />
+      {/key}
+    </Panel>
+
+    <Panel
+      title="Integrated readiness"
+      eyebrow="Gate 4 evidence"
+      status={`${readinessAverage}% / ${openHolds} holds`}
+      class="readiness-panel"
+    >
+      <div class="readiness-summary" id="readiness">
+        <div>
+          <span>Gate state</span>
+          <strong class:status-go={openHolds === 0}>
+            {openHolds > 0 ? "HOLD" : "POLL OPEN"}
+          </strong>
+        </div>
+        <div>
+          <span>Systems above threshold</span>
+          <strong>{program.readiness.filter((item) => item.value >= 85).length} / 6</strong>
+        </div>
+        <div>
+          <span>Configuration</span>
+          <strong>LC-01.1847</strong>
+        </div>
+        <p>
+          Evidence changes only after a disposition is authorized. Waivers remain visible in the
+          permanent configuration record.
+        </p>
+      </div>
+      <ReadinessMatrix items={program.readiness} />
+    </Panel>
+
+    <Panel
+      title="Mission exposure"
+      eyebrow="Uncertainty model"
+      status={activeChoice && !program.decisionResolved ? "Projected" : "Current"}
+      class="risk-panel"
+    >
+      <RiskGauge risk={displayedRisk} confidence={displayedConfidence} />
+      {#if activeChoice && !program.decisionResolved}
+        <div class="projection-note">
+          <span>Previewing</span>
+          <strong>{activeChoice.label}</strong>
+        </div>
+      {/if}
+      <dl class="exposure-list">
+        <div>
+          <dt>Vehicle loss claim</dt>
+          <dd>{formatCredits(1_940_000_000)}</dd>
+        </div>
+        <div>
+          <dt>Insurance premium</dt>
+          <dd class="warning">+8.4%</dd>
+        </div>
+        <div>
+          <dt>Delay tolerance</dt>
+          <dd>36 hours</dd>
+        </div>
+      </dl>
+      <div class="rival-card">
+        <div>
+          <span>Competitive pressure</span>
+          <b>VANTAGE ORBITAL</b>
+        </div>
+        <strong>89%</strong>
+        <small>ready</small>
+        <p>
+          Next launch in <b>{rivalWindowHours}h</b>. Its customer bid improves every hour your
+          anomaly remains open.
+        </p>
+        {#if program.rivalDelayHours > 0}
+          <span class="rival-impact">Reserve denied · rival slips +{program.rivalDelayHours}h</span>
+        {/if}
+      </div>
+    </Panel>
+
+    <Panel
+      title="Critical path & capacity"
+      eyebrow="Industrial dependency map"
+      status="1 exposed chain"
+      class="supply-panel"
+    >
+      <div class="critical-chain" id="supply">
+        <article>
+          <span class="chain-index">01</span>
+          <div>
+            <strong>Kestrel bearing / lot 77A</strong>
+            <small>Supplier quality record</small>
+          </div>
+          <b class:status-go={program.decisionResolved === "acquire"}>
+            {program.decisionResolved === "acquire"
+              ? "REPLACED"
+              : program.decisionResolved === "waive"
+                ? "WAIVED"
+                : program.decisionResolved === "verify"
+                  ? "VERIFIED"
+                  : "CONDITIONAL"}
+          </b>
+        </article>
+        <article>
+          <span class="chain-index">02</span>
+          <div>
+            <strong>Halcyon fuel turbopump</strong>
+            <small>Stage-2 propulsion assembly</small>
+          </div>
+          <b
+            class:status-go={program.outcome?.kind === "success" ||
+              (program.decisionResolved && !program.outcome)}
+          >
+            {program.outcome?.kind === "success"
+              ? "FLIGHT PROVEN"
+              : program.outcome?.kind === "failure"
+                ? "IMPOUNDED"
+                : program.outcome?.kind === "scrubbed"
+                  ? "REVIEW HOLD"
+                  : program.decisionResolved
+                    ? "RELEASED"
+                    : "BLOCKED"}
+          </b>
+        </article>
+        <article>
+          <span class="chain-index">03</span>
+          <div>
+            <strong>Arcadia stage 2</strong>
+            <small>Integrated flight vehicle</small>
+          </div>
+          <b
+            class:status-go={program.outcome?.kind === "success" ||
+              (program.decisionResolved && !program.outcome)}
+          >
+            {program.outcome?.kind === "success"
+              ? "RECOVERED"
+              : program.outcome?.kind === "failure"
+                ? "ANOMALY HOLD"
+                : program.outcome?.kind === "scrubbed"
+                  ? "INTEGRATION"
+                  : program.decisionResolved
+                    ? "FLIGHT CONFIG"
+                    : "GATE HOLD"}
+          </b>
+        </article>
+        <article>
+          <span class="chain-index">04</span>
+          <div>
+            <strong>ORPHEUS-1 / Pioneer Tug</strong>
+            <small>6.80B CR customer mandate</small>
+          </div>
+          <b class:status-go={program.outcome?.kind === "success"}>
+            {program.outcome?.kind === "success"
+              ? "COMMISSIONED"
+              : program.outcome
+                ? "CLOSED"
+                : "AWAITING GO"}
+          </b>
+        </article>
+      </div>
+      <div class="capacity-strip">
+        <article>
+          <span>Qualified reserve pump</span>
+          <strong>{program.decisionResolved === "acquire" ? "ARCADIA LOCK" : "1 UNIT"}</strong>
+          <small>Icarus Systems · Vantage competing</small>
+        </article>
+        <article>
+          <span>Launch corridor</span>
+          <strong>{corridorState}</strong>
+          <small>{corridorDetail}</small>
+        </article>
+        <article>
+          <span>Propellant convoy</span>
+          <strong>{convoyState}</strong>
+          <small>{convoyDetail}</small>
+        </article>
+      </div>
+    </Panel>
+
+    <Panel
+      title="Program operations"
+      eyebrow="Alerts, coordination & trace"
+      status={`${program.timeline.length} events`}
+      class="feed-panel"
+    >
+      <ol class="program-feed">
+        {#each program.timeline.slice(0, 6) as entry}
+          <li class={`feed-entry feed-entry--${entry.tone}`}>
+            <time>{entry.time}</time>
+            <div>
+              <strong>{entry.title}</strong>
+              <p>{entry.body}</p>
+            </div>
+          </li>
+        {/each}
+      </ol>
+    </Panel>
+
+    <Panel
+      title="Flight director commitment"
+      eyebrow="Gate 4 / accountable decision"
+      status={gateStatus}
+      class="gate-panel"
+    >
+      <div class="gate-console" id="commitment">
+        <div class="gate-copy">
+          <span>{program.decisionResolved ? "Readiness poll" : "Commitment locked"}</span>
+          <strong>
+            {program.outcome
+              ? program.outcome.headline
+              : program.decisionResolved
+                ? "The evidence is recorded. The vehicle is yours."
+                : "Resolve QA-1044 before polling the team."}
+          </strong>
+          <p>
+            {program.outcome
+              ? program.outcome.summary
+              : "GO accepts the modeled mission risk and commits the full program. SCRUB preserves the asset, releases the window, and concedes first-mover advantage."}
+          </p>
+        </div>
+        <div class="signoff-grid" aria-label="Readiness sign-offs">
+          {#each program.signoffs as signoff}
+            <div>
+              <span>{signoff.role}</span>
+              <strong>{signoff.operator}</strong>
+              <b class={`signoff signoff--${signoff.status}`}>{signoff.status}</b>
+            </div>
+          {/each}
+        </div>
+        {#if program.outcome}
+          <div class={`outcome-card outcome-card--${program.outcome.kind}`}>
+            <span>{program.outcome.eyebrow}</span>
+            <strong>{program.outcome.headline}</strong>
+            {#if program.outcome.roll !== null}
+              <small>
+                Uncertainty draw {(program.outcome.roll * 100).toFixed(1)} / risk threshold
+                {program.missionRisk}
+              </small>
+            {/if}
+            <small>
+              Contract {formatSignedCredits(program.outcome.contractDelta)} · Reputation
+              {program.outcome.reputationDelta > 0 ? "+" : ""}{program.outcome.reputationDelta}
+            </small>
+            <button type="button" onclick={resetScenario}>Reset scenario</button>
+          </div>
+        {:else}
+          <div class="director-actions">
+            <button
+              class="scrub-control"
+              data-action="scrub"
+              type="button"
+              disabled={!program.decisionResolved}
+              onclick={() => commit("scrub")}
+            >
+              <span>Protect the asset</span>
+              <strong>SCRUB MISSION</strong>
+              <small>Lose the window · preserve hardware</small>
+            </button>
+            <button
+              class="go-control"
+              data-action="go"
+              type="button"
+              disabled={!program.decisionResolved}
+              onclick={() => commit("go")}
+            >
+              <span>Accept {program.missionRisk}% risk</span>
+              <strong>ISSUE GO</strong>
+              <small>{100 - program.missionRisk}% modeled success</small>
+            </button>
+          </div>
+        {/if}
+      </div>
+    </Panel>
+  </main>
+
+  <footer class="mission-ticker" aria-label="Live mission conditions">
+    <div>
+      <span>{missionClockLabel}</span>
+      <strong>{missionClockValue}</strong>
+    </div>
+    <div>
+      <span>{program.outcome ? "Mission" : "Weather"}</span>
+      <strong class={missionConditionTone}>{missionCondition}</strong>
+    </div>
+    <div>
+      <span>Range</span>
+      <strong class={missionConditionTone}>{rangeCondition}</strong>
+    </div>
+    <div>
+      <span>Vantage</span>
+      <strong>{rivalCondition}</strong>
+    </div>
+    <p>Local scenario model · stochastic commitment outcome · no backend commands</p>
+  </footer>
+
+  <nav class="mobile-nav" aria-label="Mobile program sections">
+    <a href="#program">Program</a>
+    <a href="#readiness">Ready</a>
+    <a href="#supply">Supply</a>
+    <a href="#commitment">Commit</a>
   </nav>
 </div>

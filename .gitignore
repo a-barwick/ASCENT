@@ -1,7 +1,6 @@
 .DS_Store
 .env
 .env.*
-!.env.example
 .direnv/
 
 # Local editor and tool state
@@ -20,14 +19,7 @@ apps/web/.svelte-kit/
 apps/web/build/
 apps/web/coverage/
 
-# Go and test output
-bin/
-coverage/
-*.coverprofile
-*.test
-
-# Local infrastructure and diagnostics
-compose.override.yaml
+# Local diagnostics
 tmp/
 dist/
 *.log

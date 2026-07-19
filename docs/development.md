@@ -1,94 +1,125 @@
 # Development guide
 
+## Current architecture
+
+ASCENT is currently a UI-only SvelteKit proof of concept. The ORPHEUS-1 scenario,
+its transition rules, and its outcome model all run in the browser. There is no
+application server, database, authentication flow, external service, or
+persistent state in the current MVP.
+
+That boundary is intentional. The present work is validating the player fantasy,
+information hierarchy, and commitment loop before introducing platform
+infrastructure.
+
 ## Toolchain
 
-- Go 1.26
 - Node 24
 - pnpm 11
-- PostgreSQL 17 through Docker Compose or a compatible standalone Compose CLI
+- Svelte 5 and SvelteKit
+- TypeScript and Vitest
 
-Run `make bootstrap` once, then `make check` before opening a change for review.
-
-## Local processes
-
-`make dev` runs the Go API and SvelteKit development server in one terminal and
-shuts both down together. It also starts PostgreSQL, applies pending migrations,
-and enables the deterministic signed development session and seed scenario.
-Run either process independently with `make dev-server` or `make dev-web`; when
-running the server directly, configure the explicit variables in `.env.example`.
-
-The local commands select `docker compose` when Docker Desktop is installed and
-fall back to `docker-compose` for compatible runtimes such as OrbStack. If
-neither command is available, install a Compose-compatible container runtime
-before running database-backed targets.
-
-The first playable exposes:
-
-- `GET /healthz`
-- `GET /api/v1/system`
-- `GET /api/v1/fixtures/market`
-- `POST /api/v1/dev/session`
-- `GET /api/v1/game`
-- `POST /api/v1/commands`
-- `GET /api/v1/events?after=<sequence>`
-
-The development session is HMAC signed, short-lived, and disabled unless
-`ASCENT_DEV_IDENTITY=1`. Company authority is still resolved from PostgreSQL for
-every command; the session token never carries economic permissions.
-
-## Protocol workflow
-
-`protocol/schema/envelopes.schema.json` is the only hand-edited envelope source.
+Install the workspace dependencies once:
 
 ```sh
-make generate
-make generate-check
+pnpm install --frozen-lockfile
 ```
 
-The generator creates a Go package under `protocol/gen/go` and a TypeScript
-workspace package under `protocol/gen/ts`. CI fails if either is stale.
+## Run locally
 
-## Database workflow
+Start the web application:
 
-Create paired migration files:
-
-```text
-migrations/000002_description.up.sql
-migrations/000002_description.down.sql
+```sh
+pnpm --filter @ascent/web dev
 ```
 
-Apply normal development migrations with `make db-migrate`. Use
-`make db-migration-test` before review; it creates an isolated database, applies
-all migrations, rolls back the latest migration, performs a full reverse
-rollback/reapply, and removes the test database.
+Open `http://localhost:5173`. The scenario begins at the ORPHEUS-1 readiness
+gate. Reloading the page or using the replay control creates a fresh local
+scenario.
 
-Use `make db-seed` to reconcile the deterministic 50-company scenario without
-starting the web processes. Use `make integration-test` for clean
-PostgreSQL-backed acceptance testing; it never mutates the normal `ascent`
-development database.
+## Validate a change
 
-Production corrections to committed economic state must use compensating
-transactions. Migration down files are for schema recovery and local/CI
-verification, not for erasing economic history.
+Run the web checks before review:
 
-## Fixtures
+```sh
+pnpm --filter @ascent/web test
+pnpm --filter @ascent/web check
+pnpm --filter @ascent/web build
+pnpm format:check
+```
 
-`make fixtures` regenerates `fixtures/market.json` from deterministic Go source.
-Do not hand-edit generated fixtures. Tests verify byte-for-byte repeatability.
+The tests cover the decision transitions, commitment outcomes, and countdown
+expiry. The release build is the final check that the Svelte application can
+be packaged without development-only assumptions.
 
-The JSON fixture is a read-only degraded UI fallback. The playable scenario is
-seeded relationally by `go run ./apps/server seed-db`, and repeated seeding is
-idempotent.
+## Code map
 
-## Economic command workflow
+- `apps/web/src/routes/+page.svelte` composes the mission-control workspace and
+  owns the local countdown.
+- `apps/web/src/lib/domain/program.ts` defines the ORPHEUS-1 state, evidence,
+  choices, readiness effects, sign-offs, outcomes, and pure transition
+  functions.
+- `apps/web/src/lib/domain/program.test.ts` verifies the consequential decision
+  paths and commitment rules.
+- `apps/web/src/lib/components/program/` contains the program-specific decision,
+  phase, readiness, and risk views.
+- `apps/web/src/lib/components/ui/` contains small reusable presentation
+  primitives.
+- `apps/web/src/lib/styles/` contains the design tokens and responsive
+  mission-control layout.
 
-Commands use the generated protocol envelope and a raw UUID `commandId`.
-Monetary values are exact integer minor units inside Go/PostgreSQL; decimal UI
-values are parsed without floating-point rounding. An actor-scoped
-`idempotencyKey` returns the original semantic result on an identical retry and
-rejects changed reuse.
+## Scenario state model
 
-Committed effects, command results, and outbox facts share one serializable
-transaction. Rejections are recorded only after rolling back staged domain
-effects. Global and per-topic event sequences support snapshot-plus-event
-recovery; process-local wakeups are disposable.
+`createInitialProgramState()` is the single starting point for a playthrough.
+The page then applies a short sequence of one-way transitions:
+
+1. `advanceProgramClock()` reduces the remaining launch window and creates a
+   stand-down outcome if the corridor closes.
+2. `applyDecision()` records one anomaly disposition and updates contingency,
+   committed spend, mission risk, confidence, readiness, sign-offs, rival
+   pressure, and the event trail.
+3. `resolveCommitment()` accepts a final `go` or `scrub` directive. A GO compares
+   an uncertainty draw with the risk the player shaped; a SCRUB preserves the
+   vehicle while conceding the current opportunity.
+
+The transition functions return new state rather than mutating their input.
+They also reject invalid repeats, such as a second disposition or a commitment
+before the active hold is resolved. Keep consequential rules in this domain
+module so the UI displays results instead of inventing them.
+
+The optional uncertainty value accepted by `resolveCommitment()` is deliberate.
+Tests pass a fixed value for deterministic assertions; the interactive scenario
+uses a browser-generated draw.
+
+## Interaction rules
+
+- Show the evidence and the material cost, schedule, risk, confidence, and rival
+  effects before authorization.
+- Treat authorization as a locked, accountable decision.
+- Do not enable GO or SCRUB until the active readiness hold has a disposition.
+- Preserve objections and waivers in the visible sign-off and event record.
+- Make SCRUB a legitimate strategic choice, not a failure-state button.
+- Keep countdown pressure legible without hiding the consequences of an action.
+- Do not add network calls or implied persistence to a control that only changes
+  local state.
+
+## Responsive and accessible UI
+
+The desktop view may remain dense, but the hierarchy must survive at tablet and
+phone widths. Prefer semantic sections, lists, buttons, fieldsets, and status
+text over interaction that depends on color or pointer hover. Program state,
+evidence, and commitment controls must remain usable from the keyboard.
+
+Shared tokens belong in `tokens.css`; cross-panel shell behavior belongs in
+`program-control.css`; route-specific layout should stay close to the route until a
+second scenario proves that it is reusable.
+
+## Extending the proof of concept
+
+The next product slice should make earlier campaign phases playable: mandate
+selection, planning, supplier commitments, testing strategy, manufacturing and
+integration decisions, and the causal buildup to a readiness anomaly. Keep that
+work local and scenario-driven while the loop is still being discovered.
+
+Persistence, accounts, multiplayer coordination, and an authoritative service
+are later platform boundaries. Add them only when a validated campaign requires
+them, and update this guide when they become real.
