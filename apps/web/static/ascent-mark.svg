@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" fill="#050607"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <title>ASCENT mark</title>
   <defs>
     <clipPath id="ascent-a">
       <path d="M13 50 30 14h4l17 36h-8.3l-3.7-8.2H24.9L21.2 50H13Zm15.1-15h7.7L32 26.6 28.1 35Z"/>

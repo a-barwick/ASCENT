@@ -327,7 +327,10 @@
 
 <div class="terminal-shell" aria-busy={refreshing || commandBusy !== null}>
   <header class="topbar">
-    <a class="brand" href="/" aria-label="ASCENT terminal home">ASCENT</a>
+    <a class="brand" href="/" aria-label="ASCENT terminal home">
+      <img src="/ascent-mark.svg" alt="" />
+      <span>ASCENT</span>
+    </a>
     <div class="system-time">
       <span>Simulation time</span>
       <strong>{snapshot?.systemTime ?? "Awaiting authority"}</strong>

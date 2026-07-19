@@ -19,12 +19,19 @@
 
 .brand {
   align-self: stretch;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   padding: 0 var(--space-4);
   border-right: 1px solid var(--border);
   font: 500 1rem/1 var(--font-sans);
   letter-spacing: 0.38em;
+}
+
+.brand img {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: none;
 }
 
 .system-time {
